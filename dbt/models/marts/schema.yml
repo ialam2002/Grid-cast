@@ -2,7 +2,7 @@ version: 2
 
 models:
   - name: fct_forecast_quality
-    description: Daily forecast quality metrics by horizon.
+    description: Daily forecast quality metrics (MAE/RMSE/MAPE) by horizon.
     columns:
       - name: forecast_date
         tests: [not_null]
@@ -10,4 +10,31 @@ models:
         tests: [not_null]
       - name: mape
         tests: [not_null]
+
+  - name: fct_forecast_model_performance
+    description: >
+      Rolling 7d and 28d MAPE tracking per horizon.
+      Used by the forecast quality dashboard for trend monitoring.
+    columns:
+      - name: forecast_date
+        tests: [not_null]
+      - name: horizon_hours
+        tests: [not_null]
+      - name: mape
+        tests: [not_null]
+      - name: mape_7d_rolling
+        tests: [not_null]
+
+  - name: fct_grid_risk_windows
+    description: >
+      Top peak-risk forecast windows from the last 48h.
+      Risk level is HIGH/MEDIUM/LOW based on APE thresholds.
+    columns:
+      - name: timestamp_utc
+        tests: [not_null]
+      - name: risk_level
+        tests:
+          - accepted_values:
+              values: ['HIGH', 'MEDIUM', 'LOW']
+
 

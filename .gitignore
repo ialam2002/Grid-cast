@@ -6,6 +6,14 @@ artifacts/
 data/
 *.pyc
 
-# Local dbt profile generated from template
+# Terraform generated/local files
+*.tfplan
+*.tfplan.*
+.terraform/
+.terraform.lock.hcl
+backend.hcl
+terraform.tfvars
+
+# Local dbt profile generated from template (contains secrets via env_var)
 /dbt/profiles/profiles.yml
 

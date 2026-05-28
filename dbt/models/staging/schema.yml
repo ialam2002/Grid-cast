@@ -1,0 +1,11 @@
+version: 2
+
+models:
+  - name: stg_load_weather_hourly
+    description: Type-normalised staging view of the silver hourly load + weather table.
+    columns:
+      - name: timestamp_utc
+        tests: [not_null, unique]
+      - name: load_mw
+        tests: [not_null]
+

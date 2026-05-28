@@ -1,12 +1,65 @@
 version: 2
 
+# Bronze source tables (raw ingestion layer - read-only in dbt)
 sources:
+  - name: bronze
+    database: "{{ env_var('DBT_ATHENA_DATABASE', 'AwsDataCatalog') }}"
+    schema: "{{ var('bronze_schema', 'bronze') }}"
+    description: Raw ingestion data from CAISO, EIA, and NOAA.
+    freshness:
+      warn_after: {count: 2, period: hour}
+      error_after: {count: 6, period: hour}
+    loaded_at_field: timestamp_utc
+    tables:
+      - name: caiso_load_raw
+        description: Hourly CAISO load actuals (bronze) by balancing area.
+        columns:
+          - name: timestamp_utc
+            tests: [not_null]
+          - name: load_mw
+            tests: [not_null]
+      - name: noaa_weather_raw
+        description: Raw NOAA hourly weather observations (pivoted wide).
+        columns:
+          - name: timestamp_utc
+            tests: [not_null]
+      - name: eia_region_load_raw
+        description: EIA hourly demand by respondent/region.
+        columns:
+          - name: timestamp_utc
+            tests: [not_null]
+          - name: demand_mw
+            tests: [not_null]
+
   - name: silver
-    schema: silver
+    database: "{{ env_var('DBT_ATHENA_DATABASE', 'AwsDataCatalog') }}"
+    schema: "{{ var('silver_schema', 'silver') }}"
+    description: Curated hourly load + weather feature table.
     tables:
       - name: load_weather_hourly
+        description: Normalized hourly load with lag, rolling, and calendar features.
+        columns:
+          - name: timestamp_utc
+            tests: [not_null, unique]
+          - name: load_mw
+            tests: [not_null]
+
   - name: gold
-    schema: gold
+    database: "{{ env_var('DBT_ATHENA_DATABASE', 'AwsDataCatalog') }}"
+    schema: "{{ var('gold_schema', 'gold') }}"
+    description: Published forecast and risk event outputs.
     tables:
       - name: forecast_hourly
+        description: Hour-ahead and day-ahead forecast predictions.
+        columns:
+          - name: timestamp_utc
+            tests: [not_null]
+          - name: prediction_mw
+            tests: [not_null]
+      - name: grid_risk_events
+        description: Top-3 highest forecast-error intervals flagged as risk windows.
+        columns:
+          - name: timestamp_utc
+            tests: [not_null]
+
 

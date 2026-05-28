@@ -1,0 +1,288 @@
+name: deploy
+
+on:
+  workflow_run:
+    workflows: [ci]
+    types: [completed]
+    branches: [master, main]
+  workflow_dispatch:
+    inputs:
+      environment:
+        description: "Target environment"
+        required: true
+        default: dev
+        type: choice
+        options: [dev, stage, prod]
+
+permissions:
+  id-token: write   # OIDC token for AWS assume-role
+  contents: read
+
+jobs:
+  # ─────────────────────────────────────────────────────────────────
+  # DEV  ── auto on every CI pass; no approval gate
+  # ─────────────────────────────────────────────────────────────────
+  deploy-dev:
+    name: Deploy → dev
+    runs-on: ubuntu-latest
+    environment: dev
+    if: >
+      github.event_name == 'workflow_dispatch' && github.event.inputs.environment == 'dev'
+      || (github.event_name == 'workflow_run' && github.event.workflow_run.conclusion == 'success')
+    concurrency:
+      group: deploy-dev
+      cancel-in-progress: false
+
+    steps:
+      - uses: actions/checkout@v4
+
+      # ── AWS credentials via OIDC (no long-lived keys in CI) ──────
+      - name: Configure AWS credentials (dev)
+        uses: aws-actions/configure-aws-credentials@v4
+        with:
+          role-to-assume: ${{ secrets.GRIDCAST_DEV_DEPLOY_ROLE_ARN }}
+          aws-region: ${{ vars.AWS_REGION || 'us-west-2' }}
+
+      # ── Terraform ────────────────────────────────────────────────
+      - uses: hashicorp/setup-terraform@v3
+        with:
+          terraform_version: 1.8.5
+
+      - name: Terraform init (dev)
+        run: |
+          terraform -chdir=infra/terraform/env/dev \
+            init -backend-config=bucket=${{ secrets.GRIDCAST_TF_STATE_BUCKET_DEV }} \
+                 -backend-config=key=gridcast/dev/terraform.tfstate \
+                 -backend-config=region=${{ vars.AWS_REGION || 'us-west-2' }} \
+                 -backend-config=dynamodb_table=${{ secrets.GRIDCAST_TF_LOCK_TABLE }}
+
+      - name: Terraform plan (dev)
+        run: |
+          terraform -chdir=infra/terraform/env/dev \
+            plan -no-color -input=false \
+                 -var="aws_region=${{ vars.AWS_REGION || 'us-west-2' }}" \
+                 -var="assume_role_arn=${{ secrets.GRIDCAST_DEV_DEPLOY_ROLE_ARN }}" \
+                 -out=tfplan.dev
+
+      - name: Terraform apply (dev)
+        run: terraform -chdir=infra/terraform/env/dev apply -auto-approve tfplan.dev
+
+      # ── Generate and apply Athena DDL ────────────────────────────
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+      - name: Install Python deps
+        run: pip install -r requirements.txt
+
+      - name: Generate Athena DDL
+        env:
+          PYTHONPATH: src
+        run: |
+          python -m gridcast.catalog.generate_athena_ddl \
+            --schema-dir schemas \
+            --output-dir infra/athena/ddl \
+            --s3-root s3://${{ secrets.GRIDCAST_DATA_BUCKET_DEV }}
+
+      # ── dbt run (staging views + mart tables) ────────────────────
+      - name: Install dbt
+        run: pip install -r requirements-dbt.txt
+
+      - name: Render dbt profile
+        run: python scripts/render_dbt_profile.py
+
+      - name: dbt run (dev)
+        working-directory: dbt
+        env:
+          DBT_TARGET: dev
+          DBT_ATHENA_S3_STAGING_DIR: s3://${{ secrets.GRIDCAST_DBT_STAGING_BUCKET_DEV }}/query-results/
+          AWS_REGION: ${{ vars.AWS_REGION || 'us-west-2' }}
+          DBT_ATHENA_DATABASE: AwsDataCatalog
+          DBT_ATHENA_WORKGROUP: gridcast-dev
+        run: dbt run --profiles-dir profiles --target dev
+
+      - name: dbt test (dev)
+        working-directory: dbt
+        env:
+          DBT_TARGET: dev
+          DBT_ATHENA_S3_STAGING_DIR: s3://${{ secrets.GRIDCAST_DBT_STAGING_BUCKET_DEV }}/query-results/
+          AWS_REGION: ${{ vars.AWS_REGION || 'us-west-2' }}
+          DBT_ATHENA_DATABASE: AwsDataCatalog
+          DBT_ATHENA_WORKGROUP: gridcast-dev
+        run: dbt test --profiles-dir profiles --target dev
+
+  # ─────────────────────────────────────────────────────────────────
+  # STAGE  ── manual approval required (GitHub Environment protection)
+  # ─────────────────────────────────────────────────────────────────
+  deploy-stage:
+    name: Deploy → stage
+    runs-on: ubuntu-latest
+    environment: stage          # ← requires reviewer approval in GitHub Environments
+    needs: deploy-dev
+    if: >
+      github.event_name == 'workflow_dispatch' && github.event.inputs.environment == 'stage'
+      || (github.event_name == 'workflow_run' && github.event.workflow_run.conclusion == 'success')
+    concurrency:
+      group: deploy-stage
+      cancel-in-progress: false
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Configure AWS credentials (stage)
+        uses: aws-actions/configure-aws-credentials@v4
+        with:
+          role-to-assume: ${{ secrets.GRIDCAST_STAGE_DEPLOY_ROLE_ARN }}
+          aws-region: ${{ vars.AWS_REGION || 'us-west-2' }}
+
+      - uses: hashicorp/setup-terraform@v3
+        with:
+          terraform_version: 1.8.5
+
+      - name: Terraform init (stage)
+        run: |
+          terraform -chdir=infra/terraform/env/stage \
+            init -backend-config=bucket=${{ secrets.GRIDCAST_TF_STATE_BUCKET_STAGE }} \
+                 -backend-config=key=gridcast/stage/terraform.tfstate \
+                 -backend-config=region=${{ vars.AWS_REGION || 'us-west-2' }} \
+                 -backend-config=dynamodb_table=${{ secrets.GRIDCAST_TF_LOCK_TABLE }}
+
+      - name: Terraform plan (stage)
+        run: |
+          terraform -chdir=infra/terraform/env/stage \
+            plan -no-color -input=false \
+                 -var="aws_region=${{ vars.AWS_REGION || 'us-west-2' }}" \
+                 -var="assume_role_arn=${{ secrets.GRIDCAST_STAGE_DEPLOY_ROLE_ARN }}" \
+                 -out=tfplan.stage
+
+      - name: Terraform apply (stage)
+        run: terraform -chdir=infra/terraform/env/stage apply -auto-approve tfplan.stage
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+
+      - name: Install deps
+        run: |
+          pip install -r requirements.txt
+          pip install -r requirements-dbt.txt
+
+      - name: Generate Athena DDL
+        env:
+          PYTHONPATH: src
+        run: |
+          python -m gridcast.catalog.generate_athena_ddl \
+            --schema-dir schemas \
+            --output-dir infra/athena/ddl \
+            --s3-root s3://${{ secrets.GRIDCAST_DATA_BUCKET_STAGE }}
+
+      - name: Render dbt profile
+        run: python scripts/render_dbt_profile.py
+
+      - name: dbt run (stage)
+        working-directory: dbt
+        env:
+          DBT_TARGET: stage
+          DBT_ATHENA_S3_STAGING_DIR: s3://${{ secrets.GRIDCAST_DBT_STAGING_BUCKET_STAGE }}/query-results/
+          AWS_REGION: ${{ vars.AWS_REGION || 'us-west-2' }}
+          DBT_ATHENA_DATABASE: AwsDataCatalog
+          DBT_ATHENA_WORKGROUP: gridcast-stage
+        run: dbt run --profiles-dir profiles --target stage
+
+      - name: dbt test (stage)
+        working-directory: dbt
+        env:
+          DBT_TARGET: stage
+          DBT_ATHENA_S3_STAGING_DIR: s3://${{ secrets.GRIDCAST_DBT_STAGING_BUCKET_STAGE }}/query-results/
+          AWS_REGION: ${{ vars.AWS_REGION || 'us-west-2' }}
+          DBT_ATHENA_DATABASE: AwsDataCatalog
+          DBT_ATHENA_WORKGROUP: gridcast-stage
+        run: dbt test --profiles-dir profiles --target stage
+
+  # ─────────────────────────────────────────────────────────────────
+  # PROD  ── requires separate approval after stage passes
+  # ─────────────────────────────────────────────────────────────────
+  deploy-prod:
+    name: Deploy → prod
+    runs-on: ubuntu-latest
+    environment: prod           # ← requires reviewer approval in GitHub Environments
+    needs: deploy-stage
+    if: >
+      github.event_name == 'workflow_dispatch' && github.event.inputs.environment == 'prod'
+      || (github.event_name == 'workflow_run' && github.event.workflow_run.conclusion == 'success')
+    concurrency:
+      group: deploy-prod
+      cancel-in-progress: false
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Configure AWS credentials (prod)
+        uses: aws-actions/configure-aws-credentials@v4
+        with:
+          role-to-assume: ${{ secrets.GRIDCAST_PROD_DEPLOY_ROLE_ARN }}
+          aws-region: ${{ vars.AWS_REGION || 'us-west-2' }}
+
+      - uses: hashicorp/setup-terraform@v3
+        with:
+          terraform_version: 1.8.5
+
+      - name: Terraform init (prod)
+        run: |
+          terraform -chdir=infra/terraform/env/prod \
+            init -backend-config=bucket=${{ secrets.GRIDCAST_TF_STATE_BUCKET_PROD }} \
+                 -backend-config=key=gridcast/prod/terraform.tfstate \
+                 -backend-config=region=${{ vars.AWS_REGION || 'us-west-2' }} \
+                 -backend-config=dynamodb_table=${{ secrets.GRIDCAST_TF_LOCK_TABLE }}
+
+      - name: Terraform plan (prod)
+        run: |
+          terraform -chdir=infra/terraform/env/prod \
+            plan -no-color -input=false \
+                 -var="aws_region=${{ vars.AWS_REGION || 'us-west-2' }}" \
+                 -var="assume_role_arn=${{ secrets.GRIDCAST_PROD_DEPLOY_ROLE_ARN }}" \
+                 -out=tfplan.prod
+
+      - name: Terraform apply (prod)
+        run: terraform -chdir=infra/terraform/env/prod apply -auto-approve tfplan.prod
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+
+      - name: Install deps
+        run: |
+          pip install -r requirements.txt
+          pip install -r requirements-dbt.txt
+
+      - name: Generate Athena DDL
+        env:
+          PYTHONPATH: src
+        run: |
+          python -m gridcast.catalog.generate_athena_ddl \
+            --schema-dir schemas \
+            --output-dir infra/athena/ddl \
+            --s3-root s3://${{ secrets.GRIDCAST_DATA_BUCKET_PROD }}
+
+      - name: Render dbt profile
+        run: python scripts/render_dbt_profile.py
+
+      - name: dbt run (prod)
+        working-directory: dbt
+        env:
+          DBT_TARGET: prod
+          DBT_ATHENA_S3_STAGING_DIR: s3://${{ secrets.GRIDCAST_DBT_STAGING_BUCKET_PROD }}/query-results/
+          AWS_REGION: ${{ vars.AWS_REGION || 'us-west-2' }}
+          DBT_ATHENA_DATABASE: AwsDataCatalog
+          DBT_ATHENA_WORKGROUP: gridcast-prod
+        run: dbt run --profiles-dir profiles --target prod
+
+      - name: dbt test (prod)
+        working-directory: dbt
+        env:
+          DBT_TARGET: prod
+          DBT_ATHENA_S3_STAGING_DIR: s3://${{ secrets.GRIDCAST_DBT_STAGING_BUCKET_PROD }}/query-results/
+          AWS_REGION: ${{ vars.AWS_REGION || 'us-west-2' }}
+          DBT_ATHENA_DATABASE: AwsDataCatalog
+          DBT_ATHENA_WORKGROUP: gridcast-prod
+        run: dbt test --profiles-dir profiles --target prod
+
