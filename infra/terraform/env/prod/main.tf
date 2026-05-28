@@ -1,5 +1,6 @@
 terraform {
   required_version = ">= 1.6.0"
+  backend "s3" {}
   required_providers {
     aws = {
       source  = "hashicorp/aws"
@@ -9,7 +10,14 @@ terraform {
 }
 
 provider "aws" {
-  region = "us-west-2"
+  region = var.aws_region
+
+  dynamic "assume_role" {
+    for_each = var.assume_role_arn == "" ? [] : [1]
+    content {
+      role_arn = var.assume_role_arn
+    }
+  }
 }
 
 locals {

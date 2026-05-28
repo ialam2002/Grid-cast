@@ -24,6 +24,16 @@ GridCast is a production-minded MVP for **energy load forecasting + grid operati
 - `scripts` - CI helper scripts (for example DAG import checks)
 - `tests` - unit tests for core logic
 
+## Integration fixture snapshots
+
+Fixture snapshots for pipeline integration tests are stored in `tests/fixtures`.
+
+```powershell
+cd "C:\Users\Iftekhar Alam\PycharmProjects\Grid-cast"
+$env:PYTHONPATH="src"
+.\.venv\Scripts\python.exe scripts\generate_test_fixtures.py
+```
+
 ## Quick start (local)
 
 1. Install dependencies.
@@ -77,6 +87,27 @@ $env:PYTHONPATH="src"
 - `dbt/models/staging/stg_load_weather_hourly.sql` provides standardized hourly features for analytics.
 - `dbt/models/marts/fct_forecast_quality.sql` computes daily MAE/RMSE/MAPE by horizon.
 
+### dbt profile setup (Athena)
+
+```powershell
+cd "C:\Users\Iftekhar Alam\PycharmProjects\Grid-cast"
+.\.venv\Scripts\python.exe scripts\render_dbt_profile.py
+```
+
+Set environment variables before running dbt:
+
+- `DBT_ATHENA_S3_STAGING_DIR`
+- `AWS_REGION`
+- `DBT_ATHENA_SCHEMA`
+- `DBT_ATHENA_WORKGROUP`
+
+Optional dbt dependency installation:
+
+```powershell
+cd "C:\Users\Iftekhar Alam\PycharmProjects\Grid-cast"
+.\.venv\Scripts\python.exe -m pip install -r requirements-dbt.txt
+```
+
 ## API run
 
 ```powershell
@@ -88,5 +119,16 @@ cd "C:\Users\Iftekhar Alam\PycharmProjects\Grid-cast"
 
 - This repository now includes EIA ingestion support and schema contract files; source-specific endpoint tuning can be expanded per balancing area.
 - Terraform includes `storage`, `iam`, `catalog`, `monitoring`, and `secrets` modules plus `dev`, `stage`, and `prod` environments.
+- Each Terraform environment has `backend.hcl.example` and `terraform.tfvars.example` for remote state and role-assumption bootstrap.
 - CI now runs unit tests, DAG import checks, Terraform fmt/validate/plan, and Athena DDL generation checks.
+
+### Terraform remote-state bootstrap (example)
+
+```powershell
+cd "C:\Users\Iftekhar Alam\PycharmProjects\Grid-cast\infra\terraform\env\dev"
+Copy-Item backend.hcl.example backend.hcl
+Copy-Item terraform.tfvars.example terraform.tfvars
+terraform init -backend-config=backend.hcl
+terraform plan -var-file=terraform.tfvars
+```
 

@@ -1,0 +1,6 @@
+bucket         = "gridcast-tfstate-prod"
+key            = "gridcast/prod/terraform.tfstate"
+region         = "us-west-2"
+dynamodb_table = "gridcast-tf-locks"
+encrypt        = true
+
