@@ -1,0 +1,28 @@
+tables:
+  bronze.caiso_load_raw:
+    required_columns:
+      - timestamp_utc
+      - region
+      - load_mw
+    partition_keys:
+      - date
+      - region
+    null_thresholds:
+      load_mw: 0.0
+  bronze.noaa_weather_raw:
+    required_columns:
+      - timestamp_utc
+    partition_keys:
+      - date
+    null_thresholds: {}
+  bronze.eia_region_load_raw:
+    required_columns:
+      - timestamp_utc
+      - region
+      - demand_mw
+    partition_keys:
+      - date
+      - region
+    null_thresholds:
+      demand_mw: 0.05
+

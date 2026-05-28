@@ -5,6 +5,7 @@ from dataclasses import dataclass
 import numpy as np
 import pandas as pd
 from sklearn.ensemble import HistGradientBoostingRegressor
+from sklearn.inspection import permutation_importance
 from sklearn.metrics import mean_absolute_error, mean_squared_error
 
 FEATURE_COLUMNS = [
@@ -26,16 +27,23 @@ class TrainResult:
     model: HistGradientBoostingRegressor
     predictions: pd.DataFrame
     metrics: dict[str, float]
+    baseline_metrics: dict[str, float]
+    top_drivers: list[dict[str, float]]
 
 
 def seasonal_naive_predict(df: pd.DataFrame, horizon_hours: int) -> np.ndarray:
-    return df["load_mw"].shift(24).to_numpy()[: len(df) - horizon_hours]
+    if "lag_24" in df.columns:
+        return df["lag_24"].to_numpy()
+    return df["load_mw"].shift(24).to_numpy()
 
 
 def evaluate(y_true: np.ndarray, y_pred: np.ndarray) -> dict[str, float]:
     mask = ~(np.isnan(y_true) | np.isnan(y_pred))
     yt = y_true[mask]
     yp = y_pred[mask]
+
+    if len(yt) == 0:
+        return {"mae": np.nan, "rmse": np.nan, "mape": np.nan, "p90_ae": np.nan}
 
     mae = mean_absolute_error(yt, yp)
     rmse = np.sqrt(mean_squared_error(yt, yp))
@@ -47,6 +55,8 @@ def evaluate(y_true: np.ndarray, y_pred: np.ndarray) -> dict[str, float]:
 def train_gradient_boosting(df_supervised: pd.DataFrame, split_ratio: float = 0.8) -> TrainResult:
     model_df = df_supervised.dropna(subset=FEATURE_COLUMNS + ["target_mw"]).copy()
     split_idx = int(len(model_df) * split_ratio)
+    if split_idx <= 0 or split_idx >= len(model_df):
+        raise ValueError("Not enough rows to perform time-based train/test split")
 
     train_df = model_df.iloc[:split_idx]
     test_df = model_df.iloc[split_idx:]
@@ -56,10 +66,36 @@ def train_gradient_boosting(df_supervised: pd.DataFrame, split_ratio: float = 0.
 
     pred = model.predict(test_df[FEATURE_COLUMNS])
     metrics = evaluate(test_df["target_mw"].to_numpy(), pred)
+    baseline_pred = seasonal_naive_predict(test_df, horizon_hours=24)
+    baseline_metrics = evaluate(test_df["target_mw"].to_numpy(), baseline_pred)
+
+    importances = permutation_importance(
+        model,
+        test_df[FEATURE_COLUMNS],
+        test_df["target_mw"],
+        n_repeats=5,
+        random_state=42,
+        scoring="neg_mean_absolute_error",
+    )
+    top_idx = np.argsort(importances.importances_mean)[::-1][:5]
+    top_drivers = [
+        {
+            "feature": FEATURE_COLUMNS[idx],
+            "importance": float(importances.importances_mean[idx]),
+        }
+        for idx in top_idx
+    ]
 
     predictions = test_df[["timestamp_utc", "target_mw", "is_peak_hour"]].copy()
     predictions["prediction_mw"] = pred
-    return TrainResult(model=model, predictions=predictions, metrics=metrics)
+    predictions["baseline_prediction_mw"] = baseline_pred
+    return TrainResult(
+        model=model,
+        predictions=predictions,
+        metrics=metrics,
+        baseline_metrics=baseline_metrics,
+        top_drivers=top_drivers,
+    )
 
 
 def segment_metrics(predictions: pd.DataFrame) -> dict[str, dict[str, float]]:

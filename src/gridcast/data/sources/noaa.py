@@ -39,3 +39,17 @@ def fetch_noaa_hourly(
     df["timestamp_utc"] = pd.to_datetime(df["timestamp_utc"], utc=True)
     return df[["timestamp_utc", "datatype", "value"]]
 
+
+def pivot_noaa_observations(df: pd.DataFrame) -> pd.DataFrame:
+    if df.empty:
+        return pd.DataFrame(columns=["timestamp_utc"])
+
+    out = (
+        df.assign(datatype=df["datatype"].str.lower())
+        .pivot_table(index="timestamp_utc", columns="datatype", values="value", aggfunc="mean")
+        .reset_index()
+    )
+    out.columns.name = None
+    return out
+
+

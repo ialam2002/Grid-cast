@@ -1,5 +1,8 @@
 from __future__ import annotations
 
+import os
+import subprocess
+import sys
 from datetime import datetime, timedelta
 
 from airflow import DAG
@@ -7,7 +10,9 @@ from airflow.operators.python import PythonOperator
 
 
 def build_silver() -> None:
-    print("Run Spark transform, schema checks, and write silver table")
+    env = os.environ.copy()
+    env["PYTHONPATH"] = env.get("PYTHONPATH", "src")
+    subprocess.run([sys.executable, "-m", "gridcast.pipeline.silver_job"], check=True, env=env)
 
 
 with DAG(

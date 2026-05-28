@@ -10,7 +10,20 @@ def build_hourly_features(load_df: pd.DataFrame, weather_df: pd.DataFrame | None
         raise ValueError("load_df must include timestamp_utc and load_mw")
 
     df["timestamp_utc"] = pd.to_datetime(df["timestamp_utc"], utc=True)
-    df = df.sort_values("timestamp_utc").reset_index(drop=True)
+    df = (
+        df.drop_duplicates(subset=["timestamp_utc"]) 
+        .sort_values("timestamp_utc")
+        .set_index("timestamp_utc")
+        .resample("1h")
+        .mean(numeric_only=True)
+        .reset_index()
+    )
+
+    # Clip extreme outliers to robust bounds to stabilize model training.
+    q1 = df["load_mw"].quantile(0.01)
+    q99 = df["load_mw"].quantile(0.99)
+    df["load_mw"] = df["load_mw"].clip(lower=q1, upper=q99)
+    df["load_mw"] = df["load_mw"].ffill().bfill()
 
     if weather_df is not None and not weather_df.empty:
         wx = weather_df.copy()
@@ -18,6 +31,9 @@ def build_hourly_features(load_df: pd.DataFrame, weather_df: pd.DataFrame | None
         numeric_weather = [c for c in wx.columns if c not in {"timestamp_utc"}]
         wx = wx.groupby("timestamp_utc", as_index=False)[numeric_weather].mean(numeric_only=True)
         df = df.merge(wx, on="timestamp_utc", how="left")
+        for col in [c for c in df.columns if c not in {"timestamp_utc", "load_mw", "region"} and c not in {"hour", "day_of_week", "month", "is_weekend", "is_peak_hour"}]:
+            if pd.api.types.is_numeric_dtype(df[col]):
+                df[col] = df[col].ffill().bfill()
 
     df["hour"] = df["timestamp_utc"].dt.hour
     df["day_of_week"] = df["timestamp_utc"].dt.dayofweek

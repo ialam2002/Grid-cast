@@ -1,25 +1,24 @@
 # GridCast
 
-GridCast is an MVP for **energy load forecasting + grid operations monitoring** focused on CAISO first.
+GridCast is a production-minded MVP for **energy load forecasting + grid operations monitoring** focused on CAISO first.
 
 ## What is implemented in this first iteration
 
-- CAISO load ingestion client (real endpoint) and NOAA weather client (token-based).
-- Hourly silver feature builder for lag/rolling/calendar/peak indicators.
-- Model training pipeline with:
-  - seasonal naive baseline (t-24)
-  - gradient boosting regressor
-- Evaluation metrics by horizon (`t+1h`, `t+24h`) and segment (`peak`, `offpeak`).
-- FastAPI service for forecast and risk endpoints.
-- Airflow DAG scaffolds for 4 core pipelines.
-- Terraform starter module for S3 lakehouse buckets.
+- Bronze ingest jobs for CAISO + optional NOAA + optional EIA with ingestion metadata/audit logs.
+- Silver feature pipeline with hourly normalization, lag/rolling/calendar features, and contract checks.
+- Daily training pipeline with baseline (`t-24`) vs model comparison, top-driver attribution, and model registry artifacts.
+- Scoring/publishing pipeline that writes gold forecast, metrics, risk events, and API cache artifacts.
+- FastAPI endpoints for `next24h`, `peak stress risk`, and `top drivers` with model lineage fields.
+- Airflow DAGs wired to executable Python modules.
+- Terraform storage module starter for bronze/silver/gold/log buckets.
 
 ## Repo layout
 
-- `src/gridcast` - ingestion, feature engineering, training, and runners
+- `src/gridcast` - ingestion, feature engineering, validation contracts, training, scoring, and runners
 - `api/app` - FastAPI serving layer
 - `airflow/dags` - orchestration DAG definitions
 - `infra/terraform` - Terraform modules and environment stacks
+- `schemas` - data contracts for bronze/silver/gold/ops tables
 - `tests` - unit tests for core logic
 
 ## Quick start (local)
@@ -34,13 +33,16 @@ cd "C:\Users\Iftekhar Alam\PycharmProjects\Grid-cast"
 .\.venv\Scripts\python.exe -m pytest -q
 ```
 
-## Local pipeline run (requires network and source credentials)
+## End-to-end local run (requires network for source APIs)
 
 Environment variables:
 
 - `GRIDCAST_REGION` (default `CAISO`)
-- `GRIDCAST_NOAA_TOKEN` (optional but needed for NOAA API)
-- `GRIDCAST_EIA_API_KEY` (reserved for next step)
+- `GRIDCAST_NOAA_TOKEN` (optional)
+- `GRIDCAST_NOAA_STATION_ID` (optional)
+- `GRIDCAST_EIA_API_KEY` (optional)
+- `GRIDCAST_DATA_DIR` (default `data`)
+- `GRIDCAST_ARTIFACTS_DIR` (default `artifacts`)
 
 ```powershell
 cd "C:\Users\Iftekhar Alam\PycharmProjects\Grid-cast"
@@ -48,8 +50,26 @@ $env:GRIDCAST_NOAA_TOKEN="<token>"
 .\.venv\Scripts\python.exe -m gridcast.pipeline.mvp_runner --hours 168 --horizon 24
 ```
 
+## Job-by-job execution
+
+```powershell
+cd "C:\Users\Iftekhar Alam\PycharmProjects\Grid-cast"
+$env:PYTHONPATH="src"
+.\.venv\Scripts\python.exe -m gridcast.pipeline.ingest_job --hours 2160
+.\.venv\Scripts\python.exe -m gridcast.pipeline.silver_job
+.\.venv\Scripts\python.exe -m gridcast.pipeline.train_job --horizons 1 24
+.\.venv\Scripts\python.exe -m gridcast.pipeline.score_job
+```
+
+## API run
+
+```powershell
+cd "C:\Users\Iftekhar Alam\PycharmProjects\Grid-cast"
+.\.venv\Scripts\python.exe -m uvicorn api.app.main:app --host 0.0.0.0 --port 8000
+```
+
 ## Notes
 
-- This MVP intentionally starts with CAISO + NOAA. EIA ingestion adapter and dbt/Athena marts are next.
-- Airflow and Terraform files are scaffold-level to accelerate phase-2 productionization.
+- This repository now includes EIA ingestion support and schema contract files; source-specific endpoint tuning can be expanded per balancing area.
+- Spark/Delta/dbt/Athena and full Terraform modules (`network`, `iam`, `compute`, `catalog`, `monitoring`, `secrets`) are the next infra increment.
 

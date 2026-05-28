@@ -1,5 +1,8 @@
 from __future__ import annotations
 
+import os
+import subprocess
+import sys
 from datetime import datetime
 
 from airflow import DAG
@@ -7,7 +10,13 @@ from airflow.operators.python import PythonOperator
 
 
 def train_models() -> None:
-    print("Train candidate models and register champion by horizon metrics")
+    env = os.environ.copy()
+    env["PYTHONPATH"] = env.get("PYTHONPATH", "src")
+    subprocess.run(
+        [sys.executable, "-m", "gridcast.pipeline.train_job", "--horizons", "1", "24"],
+        check=True,
+        env=env,
+    )
 
 
 with DAG(

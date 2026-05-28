@@ -1,5 +1,8 @@
 from __future__ import annotations
 
+import os
+import subprocess
+import sys
 from datetime import datetime
 
 from airflow import DAG
@@ -7,7 +10,9 @@ from airflow.operators.python import PythonOperator
 
 
 def score_publish_notify() -> None:
-    print("Score next horizons, compute risk indicators, publish gold + API cache")
+    env = os.environ.copy()
+    env["PYTHONPATH"] = env.get("PYTHONPATH", "src")
+    subprocess.run([sys.executable, "-m", "gridcast.pipeline.score_job"], check=True, env=env)
 
 
 with DAG(

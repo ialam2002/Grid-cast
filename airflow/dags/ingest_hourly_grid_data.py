@@ -1,5 +1,8 @@
 from __future__ import annotations
 
+import os
+import subprocess
+import sys
 from datetime import datetime, timedelta
 
 from airflow import DAG
@@ -7,8 +10,13 @@ from airflow.operators.python import PythonOperator
 
 
 def pull_and_land_sources() -> None:
-    # Placeholder task: wire this to ingestion package functions in deployment.
-    print("Pull CAISO/EIA/NOAA, validate payload, and land to bronze")
+    env = os.environ.copy()
+    env["PYTHONPATH"] = env.get("PYTHONPATH", "src")
+    subprocess.run(
+        [sys.executable, "-m", "gridcast.pipeline.ingest_job", "--hours", "2160"],
+        check=True,
+        env=env,
+    )
 
 
 with DAG(

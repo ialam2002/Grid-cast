@@ -2,34 +2,37 @@ from __future__ import annotations
 
 import argparse
 import json
-from datetime import datetime, timedelta, timezone
 from pathlib import Path
 
-from gridcast.data.sources.caiso import fetch_caiso_load
-from gridcast.features.build_features import build_hourly_features, make_supervised
-from gridcast.modeling.train import segment_metrics, train_gradient_boosting
+from gridcast.config import get_settings
+from gridcast.pipeline.jobs import (
+    build_silver_features,
+    ingest_hourly_grid_data,
+    score_and_publish_forecasts,
+    train_and_evaluate_models,
+)
 
 
 def run(hours: int, horizon: int, output_dir: Path) -> dict:
-    end_utc = datetime.now(timezone.utc).replace(minute=0, second=0, microsecond=0)
-    start_utc = end_utc - timedelta(hours=hours)
-
-    load_df = fetch_caiso_load(start_utc=start_utc, end_utc=end_utc)
-    feature_df = build_hourly_features(load_df)
-    supervised = make_supervised(feature_df, horizon_hours=horizon)
-
-    result = train_gradient_boosting(supervised)
-    seg = segment_metrics(result.predictions)
+    settings = get_settings()
+    ingest = ingest_hourly_grid_data(hours=hours)
+    silver = build_silver_features()
+    registry = train_and_evaluate_models(horizons=[1, horizon])
+    publish = score_and_publish_forecasts()
 
     output_dir.mkdir(parents=True, exist_ok=True)
-    pred_path = output_dir / "forecast_predictions.parquet"
-    metric_path = output_dir / "metrics.json"
+    bundle_path = output_dir / "run_bundle.json"
+    payload = {
+        "ingest": ingest,
+        "silver": silver,
+        "registry": registry,
+        "publish": publish,
+        "artifacts_dir": str(settings.artifacts_dir),
+        "data_dir": str(settings.data_dir),
+    }
+    bundle_path.write_text(json.dumps(payload, indent=2), encoding="utf-8")
 
-    result.predictions.to_parquet(pred_path, index=False)
-    metrics_payload = {"overall": result.metrics, "segments": seg, "horizon_hours": horizon}
-    metric_path.write_text(json.dumps(metrics_payload, indent=2), encoding="utf-8")
-
-    return {"predictions": str(pred_path), "metrics": str(metric_path), **metrics_payload}
+    return {"bundle": str(bundle_path), **payload}
 
 
 def main() -> None:

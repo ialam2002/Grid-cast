@@ -1,0 +1,32 @@
+tables:
+  gold.forecast_hourly:
+    required_columns:
+      - timestamp_utc
+      - target_mw
+      - prediction_mw
+      - horizon_hours
+    partition_keys:
+      - date
+      - horizon_hours
+    null_thresholds:
+      prediction_mw: 0.0
+  gold.forecast_metrics_daily:
+    required_columns:
+      - run_ts_utc
+      - horizon_hours
+      - mae
+      - rmse
+      - mape
+      - p90_ae
+  gold.grid_risk_events:
+    required_columns:
+      - timestamp_utc
+      - target_mw
+      - prediction_mw
+      - abs_error
+  ops.pipeline_run_audit:
+    required_columns:
+      - job_name
+      - status
+      - run_ts_utc
+

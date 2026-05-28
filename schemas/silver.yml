@@ -1,0 +1,18 @@
+tables:
+  silver.load_weather_hourly:
+    required_columns:
+      - timestamp_utc
+      - load_mw
+      - lag_1
+      - lag_24
+      - lag_168
+      - roll_mean_24
+      - roll_std_24
+      - is_peak_hour
+    partition_keys:
+      - date
+    null_thresholds:
+      load_mw: 0.0
+      lag_24: 0.10
+      roll_mean_24: 0.05
+
