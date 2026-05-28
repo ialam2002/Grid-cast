@@ -1,0 +1,12 @@
+version: 2
+
+sources:
+  - name: silver
+    schema: silver
+    tables:
+      - name: load_weather_hourly
+  - name: gold
+    schema: gold
+    tables:
+      - name: forecast_hourly
+

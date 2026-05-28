@@ -1,0 +1,13 @@
+version: 2
+
+models:
+  - name: fct_forecast_quality
+    description: Daily forecast quality metrics by horizon.
+    columns:
+      - name: forecast_date
+        tests: [not_null]
+      - name: horizon_hours
+        tests: [not_null]
+      - name: mape
+        tests: [not_null]
+

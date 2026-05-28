@@ -18,7 +18,10 @@ GridCast is a production-minded MVP for **energy load forecasting + grid operati
 - `api/app` - FastAPI serving layer
 - `airflow/dags` - orchestration DAG definitions
 - `infra/terraform` - Terraform modules and environment stacks
+- `infra/athena/ddl` - generated Athena external table DDL
+- `dbt` - staging and mart models for analytics
 - `schemas` - data contracts for bronze/silver/gold/ops tables
+- `scripts` - CI helper scripts (for example DAG import checks)
 - `tests` - unit tests for core logic
 
 ## Quick start (local)
@@ -61,6 +64,19 @@ $env:PYTHONPATH="src"
 .\.venv\Scripts\python.exe -m gridcast.pipeline.score_job
 ```
 
+## Generate Athena DDL from schema contracts
+
+```powershell
+cd "C:\Users\Iftekhar Alam\PycharmProjects\Grid-cast"
+$env:PYTHONPATH="src"
+.\.venv\Scripts\python.exe -m gridcast.catalog.generate_athena_ddl --schema-dir schemas --output-dir infra/athena/ddl --s3-root s3://gridcast-dev-lakehouse
+```
+
+## dbt models
+
+- `dbt/models/staging/stg_load_weather_hourly.sql` provides standardized hourly features for analytics.
+- `dbt/models/marts/fct_forecast_quality.sql` computes daily MAE/RMSE/MAPE by horizon.
+
 ## API run
 
 ```powershell
@@ -71,5 +87,6 @@ cd "C:\Users\Iftekhar Alam\PycharmProjects\Grid-cast"
 ## Notes
 
 - This repository now includes EIA ingestion support and schema contract files; source-specific endpoint tuning can be expanded per balancing area.
-- Spark/Delta/dbt/Athena and full Terraform modules (`network`, `iam`, `compute`, `catalog`, `monitoring`, `secrets`) are the next infra increment.
+- Terraform includes `storage`, `iam`, `catalog`, `monitoring`, and `secrets` modules plus `dev`, `stage`, and `prod` environments.
+- CI now runs unit tests, DAG import checks, Terraform fmt/validate/plan, and Athena DDL generation checks.
 

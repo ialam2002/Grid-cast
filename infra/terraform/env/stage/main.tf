@@ -14,7 +14,7 @@ provider "aws" {
 
 locals {
   project     = "gridcast"
-  environment = "dev"
+  environment = "stage"
   tags = {
     project = local.project
     env     = local.environment

@@ -1,0 +1,18 @@
+name: gridcast_dbt
+version: 1.0.0
+config-version: 2
+
+profile: gridcast_dbt
+
+model-paths: ["dbt/models"]
+seed-paths: ["dbt/seeds"]
+macro-paths: ["dbt/macros"]
+test-paths: ["dbt/tests"]
+
+models:
+  gridcast_dbt:
+    staging:
+      +materialized: view
+    marts:
+      +materialized: table
+
