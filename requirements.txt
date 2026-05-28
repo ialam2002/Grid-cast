@@ -1,0 +1,10 @@
+pandas==2.2.2
+numpy==1.26.4
+requests==2.32.3
+python-dateutil==2.9.0.post0
+scikit-learn==1.5.1
+pyarrow==17.0.0
+fastapi==0.115.0
+uvicorn==0.30.6
+pytest==8.3.2
+
