@@ -4,6 +4,7 @@ import hashlib
 import json
 from datetime import datetime, timedelta, timezone
 from pathlib import Path
+import time
 
 import joblib
 import pandas as pd
@@ -41,7 +42,12 @@ def _append_audit(data_dir: Path, job_name: str, status: str, detail: dict) -> N
         fh.write(json.dumps(record) + "\n")
 
 
-def _fetch_caiso_load_chunked(start_utc: datetime, end_utc: datetime, chunk_days: int = 28) -> tuple[pd.DataFrame, int]:
+def _fetch_caiso_load_chunked(
+    start_utc: datetime,
+    end_utc: datetime,
+    chunk_days: int = 28,
+    pause_seconds: float = 0.0,
+) -> tuple[pd.DataFrame, int]:
     """Fetch CAISO load in bounded windows to avoid OASIS date-range limits."""
     if chunk_days <= 0:
         raise ValueError("chunk_days must be positive")
@@ -55,6 +61,9 @@ def _fetch_caiso_load_chunked(start_utc: datetime, end_utc: datetime, chunk_days
         frames.append(fetch_caiso_load(start_utc=window_start, end_utc=window_end))
         chunk_count += 1
         window_start = window_end
+        if pause_seconds > 0 and window_start < end_utc:
+            # Gentle pacing lowers the chance of CAISO 429s during long backfills.
+            time.sleep(pause_seconds)
 
     if not frames:
         return pd.DataFrame(columns=["timestamp_utc", "region", "load_mw"]), chunk_count
@@ -64,7 +73,11 @@ def _fetch_caiso_load_chunked(start_utc: datetime, end_utc: datetime, chunk_days
     return out, chunk_count
 
 
-def ingest_hourly_grid_data(hours: int = 24 * 90, caiso_chunk_days: int = 28) -> dict:
+def ingest_hourly_grid_data(
+    hours: int = 24 * 90,
+    caiso_chunk_days: int = 28,
+    caiso_chunk_pause_seconds: float = 0.0,
+) -> dict:
     settings = get_settings()
     data_dir = settings.data_dir
     bronze_dir = data_dir / "bronze"
@@ -77,6 +90,7 @@ def ingest_hourly_grid_data(hours: int = 24 * 90, caiso_chunk_days: int = 28) ->
         start_utc=start_utc,
         end_utc=end_utc,
         chunk_days=caiso_chunk_days,
+        pause_seconds=caiso_chunk_pause_seconds,
     )
     validate_required_columns(caiso_df, ["timestamp_utc", "load_mw"], "bronze.caiso_load_raw")
     caiso_path = bronze_dir / "caiso_load_raw.parquet"
@@ -86,30 +100,47 @@ def ingest_hourly_grid_data(hours: int = 24 * 90, caiso_chunk_days: int = 28) ->
         "start_utc": start_utc.isoformat(),
         "end_utc": end_utc.isoformat(),
         "caiso_chunk_days": caiso_chunk_days,
+        "caiso_chunk_pause_seconds": caiso_chunk_pause_seconds,
         "caiso_chunk_count": caiso_chunk_count,
         "caiso_rows": len(caiso_df),
         "caiso_schema_hash": _schema_hash(caiso_df),
     }
+    warnings: list[str] = []
 
     if settings.eia_api_key:
-        eia_df = fetch_eia_region_load(start_utc=start_utc, end_utc=end_utc, api_key=settings.eia_api_key)
-        eia_path = bronze_dir / "eia_region_load_raw.parquet"
-        eia_df.to_parquet(eia_path, index=False)
-        payload["eia_rows"] = len(eia_df)
-        payload["eia_schema_hash"] = _schema_hash(eia_df)
+        try:
+            eia_df = fetch_eia_region_load(start_utc=start_utc, end_utc=end_utc, api_key=settings.eia_api_key)
+            eia_path = bronze_dir / "eia_region_load_raw.parquet"
+            eia_df.to_parquet(eia_path, index=False)
+            payload["eia_rows"] = len(eia_df)
+            payload["eia_schema_hash"] = _schema_hash(eia_df)
+        except Exception as exc:  # noqa: BLE001 - tracked in audit payload
+            message = f"EIA ingestion skipped: {exc}"
+            if settings.strict_ingestion:
+                raise
+            warnings.append(message)
 
     if settings.noaa_token and settings.noaa_station_id:
-        noaa_long = fetch_noaa_hourly(
-            station_id=settings.noaa_station_id,
-            start_date=start_utc,
-            end_date=end_utc,
-            token=settings.noaa_token,
-        )
-        noaa_wide = pivot_noaa_observations(noaa_long)
-        noaa_path = bronze_dir / "noaa_weather_raw.parquet"
-        noaa_wide.to_parquet(noaa_path, index=False)
-        payload["noaa_rows"] = len(noaa_wide)
-        payload["noaa_schema_hash"] = _schema_hash(noaa_wide)
+        try:
+            noaa_long = fetch_noaa_hourly(
+                station_id=settings.noaa_station_id,
+                start_date=start_utc,
+                end_date=end_utc,
+                token=settings.noaa_token,
+            )
+            noaa_wide = pivot_noaa_observations(noaa_long)
+            noaa_path = bronze_dir / "noaa_weather_raw.parquet"
+            noaa_wide.to_parquet(noaa_path, index=False)
+            payload["noaa_rows"] = len(noaa_wide)
+            payload["noaa_schema_hash"] = _schema_hash(noaa_wide)
+        except Exception as exc:  # noqa: BLE001 - tracked in audit payload
+            message = f"NOAA ingestion skipped: {exc}"
+            if settings.strict_ingestion:
+                raise
+            warnings.append(message)
+
+    if warnings:
+        payload["warnings"] = warnings
 
     _append_audit(data_dir, "ingest_hourly_grid_data", "success", payload)
     return payload

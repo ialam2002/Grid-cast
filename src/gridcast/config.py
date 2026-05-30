@@ -22,6 +22,6 @@ def get_settings() -> Settings:
         noaa_station_id=os.getenv("GRIDCAST_NOAA_STATION_ID"),
         data_dir=Path(os.getenv("GRIDCAST_DATA_DIR", "data")),
         artifacts_dir=Path(os.getenv("GRIDCAST_ARTIFACTS_DIR", "artifacts")),
-        strict_ingestion=os.getenv("GRIDCAST_STRICT_INGESTION", "true").lower() == "true",
+        strict_ingestion=os.getenv("GRIDCAST_STRICT_INGESTION", "false").lower() == "true",
     )
 

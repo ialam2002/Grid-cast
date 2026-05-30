@@ -56,11 +56,19 @@ Environment variables:
 - `GRIDCAST_EIA_API_KEY` (optional)
 - `GRIDCAST_DATA_DIR` (default `data`)
 - `GRIDCAST_ARTIFACTS_DIR` (default `artifacts`)
+- `GRIDCAST_STRICT_INGESTION` (default `false`; when `true`, optional source failures fail the run)
 
 ```powershell
 cd "C:\Users\Iftekhar Alam\PycharmProjects\Grid-cast"
 $env:GRIDCAST_NOAA_TOKEN="<token>"
 .\.venv\Scripts\python.exe -m gridcast.pipeline.mvp_runner --hours 168 --horizon 24
+```
+
+To discover valid NOAA LCD station IDs for California:
+
+```powershell
+cd "C:\Users\Iftekhar Alam\PycharmProjects\Grid-cast"
+.\.venv\Scripts\python.exe -c "import os,requests; h={'token':os.environ.get('GRIDCAST_NOAA_TOKEN','')}; p={'datasetid':'LCD','locationid':'FIPS:06','limit':5}; r=requests.get('https://www.ncei.noaa.gov/cdo-web/api/v2/stations',headers=h,params=p,timeout=60); print(r.status_code); print(r.text[:800])"
 ```
 
 ## Job-by-job execution
@@ -79,7 +87,7 @@ For longer historical pulls, CAISO ingestion supports API window chunking:
 ```powershell
 cd "C:\Users\Iftekhar Alam\PycharmProjects\Grid-cast"
 $env:PYTHONPATH="src"
-.\.venv\Scripts\python.exe -m gridcast.pipeline.ingest_job --hours 26280 --caiso-chunk-days 28
+.\.venv\Scripts\python.exe -m gridcast.pipeline.ingest_job --hours 26280 --caiso-chunk-days 28 --caiso-chunk-pause-seconds 2
 ```
 
 ## Generate Athena DDL from schema contracts
@@ -138,5 +146,29 @@ Copy-Item backend.hcl.example backend.hcl
 Copy-Item terraform.tfvars.example terraform.tfvars
 terraform init -backend-config=backend.hcl
 terraform plan -var-file=terraform.tfvars
+```
+
+### Easier AWS/Terraform bootstrap (recommended)
+
+Use the helper script to generate `backend.hcl` and `terraform.tfvars` in one step:
+
+```powershell
+cd "C:\Users\Iftekhar Alam\PycharmProjects\Grid-cast"
+.\.venv\Scripts\python.exe scripts\bootstrap_terraform_env.py --env dev --account-id 111122223333
+```
+
+Then run Terraform for that environment:
+
+```powershell
+cd "C:\Users\Iftekhar Alam\PycharmProjects\Grid-cast\infra\terraform\env\dev"
+terraform init -backend-config=backend.hcl
+terraform plan -var-file=terraform.tfvars
+```
+
+To overwrite existing local files intentionally:
+
+```powershell
+cd "C:\Users\Iftekhar Alam\PycharmProjects\Grid-cast"
+.\.venv\Scripts\python.exe scripts\bootstrap_terraform_env.py --env dev --account-id 111122223333 --force
 ```
 

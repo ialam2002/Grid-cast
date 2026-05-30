@@ -70,10 +70,40 @@ def test_ingest_splits_large_caiso_windows(tmp_path, monkeypatch) -> None:
 
     monkeypatch.setattr("gridcast.pipeline.jobs.fetch_caiso_load", _fake_fetch)
 
-    payload = ingest_hourly_grid_data(hours=24 * 40, caiso_chunk_days=10)
+    payload = ingest_hourly_grid_data(hours=24 * 40, caiso_chunk_days=10, caiso_chunk_pause_seconds=0.0)
 
     assert payload["caiso_chunk_count"] == 4
+    assert payload["caiso_chunk_pause_seconds"] == 0.0
     assert len(call_ranges) == 4
     assert (data_dir / "bronze" / "caiso_load_raw.parquet").exists()
+
+
+def test_ingest_non_strict_records_optional_source_warning(tmp_path, monkeypatch) -> None:
+    data_dir = tmp_path / "data"
+    artifacts_dir = tmp_path / "artifacts"
+    data_dir.mkdir(parents=True)
+    artifacts_dir.mkdir(parents=True)
+
+    monkeypatch.setenv("GRIDCAST_DATA_DIR", str(data_dir))
+    monkeypatch.setenv("GRIDCAST_ARTIFACTS_DIR", str(artifacts_dir))
+    monkeypatch.setenv("GRIDCAST_STRICT_INGESTION", "false")
+    monkeypatch.setenv("GRIDCAST_NOAA_TOKEN", "dummy")
+    monkeypatch.setenv("GRIDCAST_NOAA_STATION_ID", "dummy")
+    monkeypatch.delenv("GRIDCAST_EIA_API_KEY", raising=False)
+
+    fixed_now = datetime(2026, 5, 1, tzinfo=timezone.utc)
+    monkeypatch.setattr("gridcast.pipeline.jobs._utc_now", lambda: fixed_now)
+
+    def _fake_caiso(start_utc: datetime, end_utc: datetime) -> pd.DataFrame:
+        times = pd.date_range(start_utc, end_utc - timedelta(hours=1), freq="h", tz="UTC")
+        return pd.DataFrame({"timestamp_utc": times, "region": ["CAISO"] * len(times), "load_mw": [20000.0] * len(times)})
+
+    monkeypatch.setattr("gridcast.pipeline.jobs.fetch_caiso_load", _fake_caiso)
+    monkeypatch.setattr("gridcast.pipeline.jobs.fetch_noaa_hourly", lambda **kwargs: (_ for _ in ()).throw(RuntimeError("noaa down")))
+
+    payload = ingest_hourly_grid_data(hours=72, caiso_chunk_days=28, caiso_chunk_pause_seconds=0.0)
+
+    assert "warnings" in payload
+    assert any("NOAA ingestion skipped" in w for w in payload["warnings"])
 
 

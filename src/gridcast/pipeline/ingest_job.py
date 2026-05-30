@@ -15,9 +15,19 @@ def main() -> None:
         default=28,
         help="Chunk size in days for CAISO API windows (protects multi-month backfills)",
     )
+    parser.add_argument(
+        "--caiso-chunk-pause-seconds",
+        type=float,
+        default=1.0,
+        help="Pause between chunk calls to reduce CAISO API throttling during long backfills",
+    )
     args = parser.parse_args()
 
-    payload = ingest_hourly_grid_data(hours=args.hours, caiso_chunk_days=args.caiso_chunk_days)
+    payload = ingest_hourly_grid_data(
+        hours=args.hours,
+        caiso_chunk_days=args.caiso_chunk_days,
+        caiso_chunk_pause_seconds=args.caiso_chunk_pause_seconds,
+    )
     print(json.dumps(payload, indent=2))
 
 
