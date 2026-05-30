@@ -74,6 +74,14 @@ $env:PYTHONPATH="src"
 .\.venv\Scripts\python.exe -m gridcast.pipeline.score_job
 ```
 
+For longer historical pulls, CAISO ingestion supports API window chunking:
+
+```powershell
+cd "C:\Users\Iftekhar Alam\PycharmProjects\Grid-cast"
+$env:PYTHONPATH="src"
+.\.venv\Scripts\python.exe -m gridcast.pipeline.ingest_job --hours 26280 --caiso-chunk-days 28
+```
+
 ## Generate Athena DDL from schema contracts
 
 ```powershell

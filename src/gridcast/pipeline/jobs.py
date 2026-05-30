@@ -41,7 +41,30 @@ def _append_audit(data_dir: Path, job_name: str, status: str, detail: dict) -> N
         fh.write(json.dumps(record) + "\n")
 
 
-def ingest_hourly_grid_data(hours: int = 24 * 90) -> dict:
+def _fetch_caiso_load_chunked(start_utc: datetime, end_utc: datetime, chunk_days: int = 28) -> tuple[pd.DataFrame, int]:
+    """Fetch CAISO load in bounded windows to avoid OASIS date-range limits."""
+    if chunk_days <= 0:
+        raise ValueError("chunk_days must be positive")
+
+    frames: list[pd.DataFrame] = []
+    window_start = start_utc
+    chunk_count = 0
+
+    while window_start < end_utc:
+        window_end = min(window_start + timedelta(days=chunk_days), end_utc)
+        frames.append(fetch_caiso_load(start_utc=window_start, end_utc=window_end))
+        chunk_count += 1
+        window_start = window_end
+
+    if not frames:
+        return pd.DataFrame(columns=["timestamp_utc", "region", "load_mw"]), chunk_count
+
+    out = pd.concat(frames, ignore_index=True)
+    out = out.drop_duplicates(subset=["timestamp_utc", "region"]).sort_values("timestamp_utc").reset_index(drop=True)
+    return out, chunk_count
+
+
+def ingest_hourly_grid_data(hours: int = 24 * 90, caiso_chunk_days: int = 28) -> dict:
     settings = get_settings()
     data_dir = settings.data_dir
     bronze_dir = data_dir / "bronze"
@@ -50,7 +73,11 @@ def ingest_hourly_grid_data(hours: int = 24 * 90) -> dict:
     end_utc = _utc_now().replace(minute=0, second=0, microsecond=0)
     start_utc = end_utc - timedelta(hours=hours)
 
-    caiso_df = fetch_caiso_load(start_utc=start_utc, end_utc=end_utc)
+    caiso_df, caiso_chunk_count = _fetch_caiso_load_chunked(
+        start_utc=start_utc,
+        end_utc=end_utc,
+        chunk_days=caiso_chunk_days,
+    )
     validate_required_columns(caiso_df, ["timestamp_utc", "load_mw"], "bronze.caiso_load_raw")
     caiso_path = bronze_dir / "caiso_load_raw.parquet"
     caiso_df.to_parquet(caiso_path, index=False)
@@ -58,6 +85,8 @@ def ingest_hourly_grid_data(hours: int = 24 * 90) -> dict:
     payload: dict[str, object] = {
         "start_utc": start_utc.isoformat(),
         "end_utc": end_utc.isoformat(),
+        "caiso_chunk_days": caiso_chunk_days,
+        "caiso_chunk_count": caiso_chunk_count,
         "caiso_rows": len(caiso_df),
         "caiso_schema_hash": _schema_hash(caiso_df),
     }

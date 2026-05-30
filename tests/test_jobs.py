@@ -4,7 +4,7 @@ from datetime import datetime, timedelta, timezone
 import pandas as pd
 
 from gridcast.features.build_features import build_hourly_features
-from gridcast.pipeline.jobs import score_and_publish_forecasts, train_and_evaluate_models
+from gridcast.pipeline.jobs import ingest_hourly_grid_data, score_and_publish_forecasts, train_and_evaluate_models
 
 
 def test_train_and_publish_writes_registry_and_cache(tmp_path, monkeypatch) -> None:
@@ -38,4 +38,42 @@ def test_train_and_publish_writes_registry_and_cache(tmp_path, monkeypatch) -> N
     cache = json.loads((artifacts_dir / "api_cache.json").read_text(encoding="utf-8"))
     assert "top_drivers" in cache
     assert "model_version" in cache
+
+
+def test_ingest_splits_large_caiso_windows(tmp_path, monkeypatch) -> None:
+    data_dir = tmp_path / "data"
+    artifacts_dir = tmp_path / "artifacts"
+    data_dir.mkdir(parents=True)
+    artifacts_dir.mkdir(parents=True)
+
+    monkeypatch.setenv("GRIDCAST_DATA_DIR", str(data_dir))
+    monkeypatch.setenv("GRIDCAST_ARTIFACTS_DIR", str(artifacts_dir))
+    monkeypatch.delenv("GRIDCAST_EIA_API_KEY", raising=False)
+    monkeypatch.delenv("GRIDCAST_NOAA_TOKEN", raising=False)
+    monkeypatch.delenv("GRIDCAST_NOAA_STATION_ID", raising=False)
+
+    fixed_now = datetime(2026, 5, 1, tzinfo=timezone.utc)
+    monkeypatch.setattr("gridcast.pipeline.jobs._utc_now", lambda: fixed_now)
+
+    call_ranges: list[tuple[datetime, datetime]] = []
+
+    def _fake_fetch(start_utc: datetime, end_utc: datetime) -> pd.DataFrame:
+        call_ranges.append((start_utc, end_utc))
+        times = pd.date_range(start_utc, end_utc - timedelta(hours=1), freq="h", tz="UTC")
+        return pd.DataFrame(
+            {
+                "timestamp_utc": times,
+                "region": ["CAISO"] * len(times),
+                "load_mw": [20000.0] * len(times),
+            }
+        )
+
+    monkeypatch.setattr("gridcast.pipeline.jobs.fetch_caiso_load", _fake_fetch)
+
+    payload = ingest_hourly_grid_data(hours=24 * 40, caiso_chunk_days=10)
+
+    assert payload["caiso_chunk_count"] == 4
+    assert len(call_ranges) == 4
+    assert (data_dir / "bronze" / "caiso_load_raw.parquet").exists()
+
 
