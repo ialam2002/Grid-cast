@@ -1,7 +1,7 @@
 variable "aws_region" {
   type        = string
   description = "AWS region for the environment"
-  default     = "us-west-2"
+  default     = "us-east-2"
 }
 
 variable "assume_role_arn" {

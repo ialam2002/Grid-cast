@@ -13,6 +13,7 @@ def test_write_terraform_env_files_creates_expected_outputs(tmp_path: Path) -> N
         account_id="111122223333",
         region="us-west-2",
         lock_table="gridcast-tf-locks",
+        assume_role_arn="",
         force=False,
     )
 
@@ -22,7 +23,7 @@ def test_write_terraform_env_files_creates_expected_outputs(tmp_path: Path) -> N
     backend = backend_path.read_text(encoding="utf-8")
     tfvars = tfvars_path.read_text(encoding="utf-8")
     assert 'bucket         = "gridcast-tfstate-dev"' in backend
-    assert 'assume_role_arn  = "arn:aws:iam::111122223333:role/gridcast-dev-terraform"' in tfvars
+    assert 'assume_role_arn  = ""' in tfvars
 
 
 def test_write_terraform_env_files_requires_force_for_existing_files(tmp_path: Path) -> None:
@@ -31,8 +32,9 @@ def test_write_terraform_env_files_requires_force_for_existing_files(tmp_path: P
         project="gridcast",
         env="stage",
         account_id="111122223333",
-        region="us-west-2",
+        region="us-east-2",
         lock_table="gridcast-tf-locks",
+        assume_role_arn="",
         force=False,
     )
 
@@ -42,8 +44,9 @@ def test_write_terraform_env_files_requires_force_for_existing_files(tmp_path: P
             project="gridcast",
             env="stage",
             account_id="111122223333",
-            region="us-west-2",
+            region="us-east-2",
             lock_table="gridcast-tf-locks",
+            assume_role_arn="",
             force=False,
         )
 

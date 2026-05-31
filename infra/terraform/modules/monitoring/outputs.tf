@@ -5,3 +5,7 @@ output "log_groups" {
   }
 }
 
+output "alarm_name" {
+  value       = var.enable_alarm ? aws_cloudwatch_metric_alarm.api_latency[0].alarm_name : null
+  description = "CloudWatch alarm name, or null when enable_alarm = false"
+}

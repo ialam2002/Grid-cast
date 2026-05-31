@@ -1,6 +1,8 @@
 terraform {
   required_version = ">= 1.6.0"
-  backend "s3" {}
+  backend "s3" {
+    use_lockfile = true
+  }
   required_providers {
     aws = {
       source  = "hashicorp/aws"
@@ -34,6 +36,10 @@ module "storage" {
   project     = local.project
   environment = local.environment
   tags        = local.tags
+
+  enable_versioning                  = true # Enable versioning for pre-prod validation
+  noncurrent_version_expiration_days = 30   # Keep old versions for 30 days then purge
+  lifecycle_expiration_days          = 180  # Expire stage data after 6 months
 }
 
 module "iam" {
@@ -55,6 +61,9 @@ module "monitoring" {
   project     = local.project
   environment = local.environment
   tags        = local.tags
+
+  log_retention_days = 14    # 2-week retention for stage
+  enable_alarm       = false # Only enable alarms in prod
 }
 
 module "secrets" {
@@ -63,4 +72,3 @@ module "secrets" {
   environment = local.environment
   tags        = local.tags
 }
-
